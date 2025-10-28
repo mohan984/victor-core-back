@@ -10,3 +10,6 @@ python manage.py collectstatic --no-input
 
 # 3. Apply Database Migrations (THE FIX!)
 python manage.py migrate
+
+# 4. Create Superuser (Uses credentials from Render Environment Variables)
+python manage.py createsuperuser --no-input
