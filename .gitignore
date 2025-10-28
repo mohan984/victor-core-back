@@ -1,0 +1,43 @@
+###########################
+# 1. ENVIRONMENT & SECRETS (Mandatory)
+###########################
+# Contains SECRET_KEY, DATABASE_URL, etc. MUST NOT be committed. 🔒
+.env
+# Python Virtual Environment
+.venv 
+venv/
+
+###########################
+# 2. DATABASE, MIGRATIONS, & MEDIA FILES
+###########################
+# Even though you use PostgreSQL, it's good practice to ignore this common local DB file
+db.sqlite3
+
+# PostgreSQL-specific logs and configuration, if created locally
+*.pgpass
+pg_hba.conf
+
+# Directory for user-uploaded files (must be stored externally in production)
+# Based on your structure, you may need one or both of these:
+media/
+uploaded_files/
+
+###########################
+# 3. PYTHON/DJANGO CACHE & BUILD ARTIFACTS
+###########################
+# Python compiled files
+*.pyc
+__pycache__/
+
+# Django's collected static files—rebuilt on Render
+staticfiles/
+
+# System logs and metadata
+*.log
+.DS_Store 
+
+###########################
+# 4. IDE/TEMP FILES
+###########################
+# VS Code folder (user-specific settings)
+.vscode/
