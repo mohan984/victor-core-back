@@ -165,6 +165,10 @@ RAZORPAY_WEBHOOK_SECRET = "my-chovilo-gubulu-99" # You make this one up
 
 STATIC_URL = 'static/'
 
+# MANDATORY FOR PRODUCTION DEPLOYMENT:
+# Absolute path to the directory where collectstatic will gather all files.
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
