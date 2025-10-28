@@ -156,8 +156,8 @@ USE_TZ = True
 # -----------------------------------------------------------------------------
 # RAZORPAY SETTINGS
 # -----------------------------------------------------------------------------
-RAZORPAY_KEY_ID = env('RAZORPAY_KEY_ID')
-RAZORPAY_KEY_SECRET = env('RAZORPAY_KEY_SECRET')
+RAZORPAY_KEY_ID=env('RAZORPAY_KEY_ID')
+RAZORPAY_KEY_SECRET=env('RAZORPAY_KEY_SECRET')
 RAZORPAY_WEBHOOK_SECRET = "my-chovilo-gubulu-99" # You make this one up
 
 # Static files (CSS, JavaScript, Images)
