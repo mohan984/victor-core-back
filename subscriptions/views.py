@@ -286,11 +286,11 @@ def payment_callback(request):
             
             else:
                 # Payment was failed, authorized, or another status
-                return redirect(f"https://victor-frontend-blush.vercel.app/price?payment=failed") # ⚠️ **Update domain!**
+                return redirect(f"https://victor-frontend-blush.vercel.app/dashboard/price?payment=failed") # ⚠️ **Update domain!**
 
         except Exception as e:
             # Log the error and redirect back to the pricing page with an error
             print(f"PAYMENT CALLBACK ERROR: {e}")
-            return redirect(f"https://victor-frontend-blush.vercel.app/price?payment=error") # ⚠️ **Update domain!**
+            return redirect(f"https://victor-frontend-blush.vercel.app/dashboard/price?payment=error") # ⚠️ **Update domain!**
     
     return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
