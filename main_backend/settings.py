@@ -59,6 +59,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -158,13 +159,16 @@ USE_TZ = True
 # -----------------------------------------------------------------------------
 RAZORPAY_KEY_ID=env('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET=env('RAZORPAY_KEY_SECRET')
-RAZORPAY_WEBHOOK_SECRET = "my-chovilo-gubulu-99" # You make this one up
+RAZORPAY_WEBHOOK_SECRET=env('RAZORPAY_WEBHOOK_SECRET') # You make this one up
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+# Static files (CSS, JavaScript, Images)
+STATIC_URL = '/static/'
 
+# Tell WhiteNoise to use the ManifestStaticFilesStorage engine
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 # MANDATORY FOR PRODUCTION DEPLOYMENT:
 # Absolute path to the directory where collectstatic will gather all files.
 STATIC_ROOT = BASE_DIR / 'staticfiles'

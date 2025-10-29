@@ -3,9 +3,10 @@
 from django.db.models import Count, Avg, Q, Sum, Case, When, F, Window
 
 from .models import TestSubmission, RevisionLog, Question, TestCard,Answer
-from django.db.models.functions import TruncDay, TruncWeek, TruncMonth, Rank
+from django.db.models.functions import TruncDay, TruncWeek, TruncMonth, Rank, ExtractHour
 from datetime import timedelta
 from django.utils import timezone
+
 
 
 def get_user_performance_analytics(user):
@@ -208,12 +209,12 @@ def get_advanced_performance_data(user, time_filter='month'):
     ).filter(question__topic__isnull=False).exclude(question__topic__exact='')
 
     # === Peak Performance Hours ===
-    learning_pattern = submissions.extra(
-        select={'hour': "CAST(strftime('%%H', finished_at) AS INTEGER)"}
-    ).values('hour').annotate(
-        focus=Avg('percentage'),
-        tests=Count('id')
-    ).order_by('hour')
+    learning_pattern = submissions.annotate(
+    hour=ExtractHour('finished_at') # Extracts the hour as an integer
+).values('hour').annotate(
+    focus=Avg('percentage'),
+    tests=Count('id')
+).order_by('hour')
 
     # === Assemble the data structure ===
     data = {
