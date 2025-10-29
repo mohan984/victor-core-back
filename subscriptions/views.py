@@ -1,4 +1,4 @@
-from django.shortcuts import render
+from django.shortcuts import render,redirect
 
 # Create your views here.
 # subscriptions/views.py
@@ -91,6 +91,63 @@ class SubscriptionViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    @action(detail=False, methods=['post'])
+    def verify_payment(self, request):
+        """
+        1. Verifies the signature sent from the client-side handler.
+        2. Activates the subscription.
+        (Alternative to Webhook for immediate feedback)
+        """
+        if not razorpay_client:
+             return Response(
+                {'error': 'Payment gateway is not configured.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+
+        data = request.data
+        razorpay_payment_id = data.get('razorpay_payment_id')
+        razorpay_order_id = data.get('razorpay_order_id')
+        razorpay_signature = data.get('razorpay_signature')
+        
+        # 1. VERIFY SIGNATURE
+        try:
+            razorpay_client.utility.verify_payment_signature({
+                'razorpay_order_id': razorpay_order_id,
+                'razorpay_payment_id': razorpay_payment_id,
+                'razorpay_signature': razorpay_signature
+            })
+        except Exception as e:
+            # Payment failed verification (tampering or invalid data)
+            return Response({'error': f'Signature verification failed: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. GET USER/PLAN DETAILS from the Order (must be done AFTER verification)
+        try:
+            order = razorpay_client.order.fetch(razorpay_order_id)
+            notes = order['notes']
+            user_id = notes.get('user_id')
+            plan_id = notes.get('plan_id')
+
+            user = User.objects.get(id=user_id)
+            plan = SubscriptionPlan.objects.get(id=plan_id)
+            
+            # 3. ACTIVATE THE SUBSCRIPTION
+            # Use get_or_create to prevent duplicates if the webhook fires later
+            UserSubscription.objects.get_or_create(
+                user=user,
+                plan=plan,
+                defaults={
+                    'razorpay_order_id': razorpay_order_id,
+                    'razorpay_payment_id': razorpay_payment_id,
+                    # start_date and end_date will be set by the model
+                }
+            )
+            
+            return Response({'message': 'Payment successfully verified and subscription activated.'}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({'error': f'Subscription activation failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+
     @action(detail=False, methods=['get'])
     def my_subscription(self, request):
         """
@@ -178,5 +235,62 @@ def razorpay_webhook(request):
         except Exception as e:
             print(f"WEBHOOK PROCESSING ERROR: {e}")
             return Response({'error': 'Internal server error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+# subscriptions/views.py (Add this new function)
+
+@csrf_exempt
+def payment_callback(request):
+    """
+    Handles the redirection from Razorpay's callback_url (CRITICAL for UPI on mobile).
+    Razorpay sends this as a GET request with payment details.
+    """
+    if request.method == "GET":
+        razorpay_payment_id = request.GET.get('razorpay_payment_id')
+        razorpay_order_id = request.GET.get('razorpay_order_id')
+        razorpay_signature = request.GET.get('razorpay_signature')
+        
+        # ⚠️ NOTE: The signature may be missing or invalid on some mobile redirects.
+        # It is safer to rely on the payment_id and fetch its status from Razorpay API here.
+        
+        # 1. Fetch Payment Status
+        try:
+            payment_info = razorpay_client.payment.fetch(razorpay_payment_id)
+            status = payment_info.get('status')
+            
+            if status == 'captured':
+                # 2. Get User/Plan details (from the order notes)
+                order = razorpay_client.order.fetch(razorpay_order_id)
+                notes = order['notes']
+                user_id = notes.get('user_id')
+                plan_id = notes.get('plan_id')
+                
+                user = User.objects.get(id=user_id)
+                plan = SubscriptionPlan.objects.get(id=plan_id)
+                
+                # 3. ACTIVATE THE SUBSCRIPTION (Same logic as verify_payment)
+                UserSubscription.objects.get_or_create(
+                    user=user,
+                    plan=plan,
+                    defaults={
+                        'razorpay_order_id': razorpay_order_id,
+                        'razorpay_payment_id': razorpay_payment_id,
+                    }
+                )
+
+                # 4. FINAL REDIRECT TO FRONTEND DASHBOARD
+                # 💡 Add a query param so the frontend can display a success toast
+                return redirect(f"https://victor-frontend-blush.vercel.app/dashboard?payment=success") # ⚠️ **Update domain!**
+            
+            else:
+                # Payment was failed, authorized, or another status
+                return redirect(f"https://victor-frontend-blush.vercel.app/price?payment=failed") # ⚠️ **Update domain!**
+
+        except Exception as e:
+            # Log the error and redirect back to the pricing page with an error
+            print(f"PAYMENT CALLBACK ERROR: {e}")
+            return redirect(f"https://victor-frontend-blush.vercel.app/price?payment=error") # ⚠️ **Update domain!**
     
     return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
