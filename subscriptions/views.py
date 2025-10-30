@@ -6,6 +6,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.http import HttpResponse
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
@@ -182,62 +183,89 @@ def razorpay_webhook(request):
     Handles the webhook from Razorpay after a successful payment.
     This is what *actually* activates the subscription.
     """
-    if request.method == "POST":
-        body = request.body.decode('utf-8')
-        received_signature = request.headers.get('X-Razorpay-Signature')
+    if request.method != "POST":
+        return HttpResponse(status=405) # 405 Method Not Allowed
+
+    body = request.body.decode('utf-8')
+    received_signature = request.headers.get('X-Razorpay-Signature')
+
+    # 1. Verify the signature
+    try:
+        secret = settings.RAZORPAY_WEBHOOK_SECRET
         
-        # 1. Verify the signature
-        try:
-            secret = settings.RAZORPAY_WEBHOOK_SECRET
-            hmac.compare_digest(
-                hmac.new(
-                    secret.encode('utf-8'),
-                    body.encode('utf-8'),
-                    hashlib.sha256
-                ).hexdigest(),
-                received_signature
+        # 💡 CHANGE 2: Robust signature calculation and comparison
+        calculated_signature = hmac.new(
+            secret.encode('utf-8'),
+            body.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
+        if not hmac.compare_digest(calculated_signature, received_signature):
+            print("WEBHOOK SIGNATURE MISMATCH")
+            # 💡 CHANGE 3: Use HttpResponse and integer status code
+            return HttpResponse('Invalid signature', status=400) 
+            
+    except Exception as e:
+        # Catch errors during signature verification (e.g., secret missing)
+        print(f"WEBHOOK SIGNATURE ERROR: {e}")
+        # 💡 CHANGE 4: Use HttpResponse and integer status code
+        return HttpResponse('Internal signature verification error', status=500)
+
+    # 2. Process the event
+    try:
+        event_data = json.loads(body)
+        event_type = event_data['event']
+        
+        # Extract payment IDs outside the conditional, just in case needed for logging/other events
+        payment_entity = event_data.get('payload', {}).get('payment', {}).get('entity', {})
+        razorpay_order_id = payment_entity.get('order_id')
+        razorpay_payment_id = payment_entity.get('id')
+
+        if event_type == 'payment.captured':
+            notes = payment_entity['notes']
+            
+            user_id = notes.get('user_id')
+            plan_id = notes.get('plan_id')
+
+            if not user_id or not plan_id:
+                print("WEBHOOK ERROR: Missing user_id or plan_id in notes")
+                # 💡 CHANGE 5: Use HttpResponse and integer status code
+                return HttpResponse('Missing notes data', status=400)
+
+            # 3. ACTIVATE THE SUBSCRIPTION
+            user = User.objects.get(id=user_id)
+            plan = SubscriptionPlan.objects.get(id=plan_id)
+            
+            # 💡 CHANGE 6: Use get_or_create for idempotency (prevents duplicates on retries)
+            UserSubscription.objects.get_or_create(
+                user=user,
+                plan=plan,
+                # Use a field that can be constrained to prevent duplicate records (e.g., order ID)
+                defaults={
+                    'razorpay_order_id': razorpay_order_id,
+                    'razorpay_payment_id': razorpay_payment_id,
+                }
             )
-        except Exception as e:
-            print(f"WEBHOOK SIGNATURE ERROR: {e}")
-            return Response({'error': 'Invalid signature'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            print(f"SUCCESS: Subscription activated for user {user.id} with plan {plan.id}")
+            
+        # 💡 CHANGE 7: Final return statement is NOW outside the IF block, but inside the main TRY block.
+        # This ensures a 200 OK for ALL successfully processed events (including non-captured ones).
+        return HttpResponse(status=200)
+
+    except (User.DoesNotExist, SubscriptionPlan.DoesNotExist):
+        # 💡 CHANGE 8: Catch specific DNE errors and return a 404/400.
+        print("WEBHOOK PROCESSING ERROR: User or Plan not found")
+        return HttpResponse('User or Plan not found', status=404)
         
-        # 2. Process the event
-        try:
-            event_data = json.loads(body)
-            event_type = event_data['event']
-
-            if event_type == 'payment.captured':
-                payment_entity = event_data['payload']['payment']['entity']
-                notes = payment_entity['notes']
-                
-                user_id = notes.get('user_id')
-                plan_id = notes.get('plan_id')
-
-                if not user_id or not plan_id:
-                    print("WEBHOOK ERROR: Missing user_id or plan_id in notes")
-                    return Response({'error': 'Missing notes data'}, status=status.HTTP_400_BAD_REQUEST)
-
-                # 3. ACTIVATE THE SUBSCRIPTION
-                user = User.objects.get(id=user_id)
-                plan = SubscriptionPlan.objects.get(id=plan_id)
-                
-                # Create the subscription record
-                UserSubscription.objects.create(
-                    user=user,
-                    plan=plan
-                    # start_date and end_date are set automatically by the model's save() method
-                )
-                
-                print(f"SUCCESS: Subscription activated for user {user.id} with plan {plan.id}")
-                
-            return Response(status=status.HTTP_200_OK)
-
-        except Exception as e:
-            print(f"WEBHOOK PROCESSING ERROR: {e}")
-            return Response({'error': 'Internal server error'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-    return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
-
+    except Exception as e:
+        # Catch all other unexpected errors during event processing.
+        print(f"WEBHOOK PROCESSING ERROR: {e}")
+        # 💡 CHANGE 9: Use HttpResponse and integer status code
+        return HttpResponse({'error': 'Internal server error'}, status=500)
+   
+# The function should no longer reach this line due to the initial check and final 200.
+# The original final line was deleted: return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 # subscriptions/views.py (Add this new function)
 
@@ -258,9 +286,9 @@ def payment_callback(request):
         # 1. Fetch Payment Status
         try:
             payment_info = razorpay_client.payment.fetch(razorpay_payment_id)
-            status = payment_info.get('status')
+            status_info = payment_info.get('status')
             
-            if status == 'captured':
+            if status_info == 'captured':
                 # 2. Get User/Plan details (from the order notes)
                 order = razorpay_client.order.fetch(razorpay_order_id)
                 notes = order['notes']
@@ -293,4 +321,4 @@ def payment_callback(request):
             print(f"PAYMENT CALLBACK ERROR: {e}")
             return redirect(f"https://victor-frontend-blush.vercel.app/dashboard/price?payment=error") # ⚠️ **Update domain!**
     
-    return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
+    return HttpResponse(status=405)
